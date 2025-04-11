@@ -5,43 +5,42 @@ namespace CommonLib.Other.PasswordHasher;
 
 public class PasswordHasher : IPasswordHasher
 {
-    private const int SaltSize = 16;
-    private const int KeySize = 32;
-    private const int Iterations = 100000;
+    private const int SaltSize = 16; // 128 бит
+    private const int KeySize = 32;  // 256 бит
+    private const int Iterations = 100_000; // количество итераций
 
     public string HashPassword(string password)
     {
-        if (string.IsNullOrWhiteSpace(password))
-        {
-            throw new ArgumentNullException("Argument exception Password hasher cannot be null or empty.");
-        }
-        byte[] salt = RandomNumberGenerator.GetBytes(SaltSize);
-        byte[] hash = KeyDerivation.Pbkdf2(password, salt, KeyDerivationPrf.HMACSHA256, Iterations, KeySize);
-        
-        return Convert.ToBase64String(Combine(salt, hash));
+        using var rng = RandomNumberGenerator.Create();
+        byte[] salt = new byte[SaltSize];
+        rng.GetBytes(salt);
+
+        using var pbkdf2 = new Rfc2898DeriveBytes(password, salt, Iterations, HashAlgorithmName.SHA256);
+        byte[] key = pbkdf2.GetBytes(KeySize);
+
+        var hashBytes = new byte[SaltSize + KeySize];
+        Array.Copy(salt, 0, hashBytes, 0, SaltSize);
+        Array.Copy(key, 0, hashBytes, SaltSize, KeySize);
+
+        return Convert.ToBase64String(hashBytes);
     }
 
     public bool VerifyPassword(string password, string hashedPassword)
     {
         byte[] hashBytes = Convert.FromBase64String(hashedPassword);
+
         byte[] salt = new byte[SaltSize];
         Array.Copy(hashBytes, 0, salt, 0, SaltSize);
-        
-        byte[] hash = KeyDerivation.Pbkdf2(password, salt, KeyDerivationPrf.HMACSHA256, Iterations, KeySize);
-        
+
+        using var pbkdf2 = new Rfc2898DeriveBytes(password, salt, Iterations, HashAlgorithmName.SHA256);
+        byte[] key = pbkdf2.GetBytes(KeySize);
+
         for (int i = 0; i < KeySize; i++)
         {
-            if (hashBytes[SaltSize + i] != hash[i])
+            if (hashBytes[i + SaltSize] != key[i])
                 return false;
         }
+
         return true;
-    }
-    
-    private static byte[] Combine(byte[] salt, byte[] hash)
-    {
-        byte[] combined = new byte[salt.Length + hash.Length];
-        Buffer.BlockCopy(salt, 0, combined, 0, salt.Length);
-        Buffer.BlockCopy(hash, 0, combined, salt.Length, hash.Length);
-        return combined;
     }
 }
